@@ -1,18 +1,60 @@
+#!/usr/bin/python
+
 from pymongo import MongoClient
+
 import argparse
 import pprint
 import json
 
-class NestedDict(dict):
-	def __getitem__(self,key):
-		if key in self: return self.get(key)
+import sys, os, shutil
+
+import socket
+import SimpleHTTPServer
+import SocketServer
+import webbrowser
+
+
+class NestedDict( dict ):
+	def __getitem__( self, key ):
+		if key in self: return self.get( key )
 		return self.setdefault(key, NestedDict())
 
-class MongoChunkVis(object):
-	def __init__(self):
+class MongoChunkVis( object ):
+	def __init__( self ):
+
+		PORT = 8888
+
 		self.parse_args()
 
-		self.collect_data(self.args['configdb'], self.args['host'], self.args['port'])
+		mchunkvis_dir = '.mchunkvis'
+		src = os.path.join( os.path.dirname( os.path.realpath( __file__ ) ), 'index.html' )
+		"""
+		if not os.path.exists( mchunkvis_dir ):
+			os.makedirs( mchunkvis_dir )
+		os.chdir( mchunkvis_dir )
+		"""
+		outf = open( 'output.json', 'w' )
+
+		outf.write( self.collect_data( self.args['configdb'], self.args['host'], self.args['port'] ) )
+
+		outf.close()
+
+		dst = os.path.join( os.getcwd(), 'index.html' )
+
+		#shutil.copyfile( src, dst )
+
+		Handler = SimpleHTTPServer.SimpleHTTPRequestHandler
+
+		for i in range( 100 ):
+			try:
+				httpd = SocketServer.TCPServer( ( "", PORT ), Handler )
+				break
+			except socket.error:
+				PORT += 1
+		print "serving chunk visualization on http://localhost:%s"%PORT
+		webbrowser.open('http://localhost:%i'%PORT)
+
+		httpd.serve_forever()
 
 	def parse_args(self):
 		parser = argparse.ArgumentParser(description='A script to generate chunk information and visualise it '\
@@ -29,7 +71,7 @@ class MongoChunkVis(object):
 
 		outputdata = { 'name' : 'databases', 'children' : [] }
 
-		mc = MongoClient(host, port)
+		mc = MongoClient(host, int("".join(port)))
 
 		db = mc["".join(configdb)]
 		#TODO - add checking that this is actually a configdb/sharded
@@ -40,7 +82,7 @@ class MongoChunkVis(object):
 		ccoll = db['collections']
 
 		for databases in cdatabases.find():
-			databasedata = { 'name' : databases['_id'], 'children' : [], 'size' : 100 }
+			databasedata = { 'name' : databases['_id'], 'children' : [] }
 			if databases['partitioned']:
 				for coll in ccoll.find( { '_id' : { '$regex' : '^%s'%databases['_id']}, 'dropped' : False } ):
 					colldata = { 'name' : coll['_id'].replace(databases['_id'],'',1), 'children' : [], 'size' : 1 }
@@ -48,14 +90,14 @@ class MongoChunkVis(object):
 						sharddata = { 'name' : shards['_id'], 'children' : [] }
 						for chunks in cchunks.find( { 'shard' : shards['_id'], 'ns' : coll['_id'] } ):
 							colldata['size'] +=1
-							chunkdata = { 'name' : chunks['_id'].replace(chunks['ns'],'',1), 'size' : 1 }
+							chunkdata = { 'name' : chunks['_id'].replace(chunks['ns'],'',1), 'size' : 1, 'objects' : 1 }
 							sharddata['children'].append(chunkdata)
 						colldata['children'].append(sharddata)
 
 					databasedata['children'].append(colldata)
 			outputdata['children'].append(databasedata)
 
-		print json.dumps(outputdata)
+		return json.dumps(outputdata)
 
 
 if __name__ == '__main__':

@@ -1,5 +1,7 @@
+
 <!DOCTYPE html>
 <meta charset="utf-8">
+<div id="vis"></div>
 <style>
 
 path {
@@ -13,34 +15,41 @@ text {
 }
 
 </style>
+<!--
+<script src="d3.v3/d3.v3.min.js"></script>
+-->
 <body>
 <form>
-  <label><input class='unshard_button' type="checkbox" name="mode" value=true checked>Show unsharded databases</label>
+  <label><input class='unshard_button' type="checkbox" name="mode" >Show Unsharded Collections</label>
+  <label><input class='select_size' type='radio' name='mode' value='size' checked>Size</label>
+  <label><input class='select_size' type='radio' name='mode' value='object'>Objects</label>
 </form>
+
 <script src="http://d3js.org/d3.v3.min.js"></script>
 <script>
 
-var width = 1400,
-    height = 800,
-    radius = Math.min(width, height) / 2;
-    rings = 4
+var width = 800,
+    height = width,
+    radius = width / 2,
+    x = d3.scale.linear().range([0, 2 * Math.PI]),
+    y = d3.scale.pow().exponent(1.3).domain([0, 1]).range([0, radius]),
+    padding = 5,
+    duration = 1000,
+    rings = 4;
 
-var x = d3.scale.linear()
-    .range([0, 2 * Math.PI]);
-
-var y = d3.scale.linear()
-    .range([0, radius]);
+var div = d3.select("#vis");
 
 var color = d3.scale.category20c();
 
-var svg = d3.select("body").append("svg")
-    .attr("width", width)
-    .attr("height", height)
+var vis = div.append("svg")
+    .attr("width", width + padding * 2)
+    .attr("height", height + padding * 2)
   .append("g")
-    .attr("transform", "translate(" + width / 2 + "," + height * .52 + ")");
+    .attr("transform", "translate(" + [radius + padding, radius + padding] + ")");
 
 var partition = d3.layout.partition()
-    .value(function(d) { return d.size; });
+    .sort(null)
+    .value(function(d) { return 5 - d.depth; });
 
 var arc = d3.svg.arc()
     .startAngle(function(d) { return Math.max(0, Math.min(2 * Math.PI, x(d.x))); })
@@ -48,105 +57,137 @@ var arc = d3.svg.arc()
     .innerRadius(function(d) { return Math.max(0, y(d.y)); })
     .outerRadius(function(d) { return Math.max(0, y(d.y + d.dy)); });
 
-d3.json("output.json", function(error, root) {
-  var g = svg.selectAll("g")
-      .data(partition.nodes(root))
-    .enter().append("g");
+d3.json("output.json", function(json) {
 
-  var path = g.append("path")
-    .attr("d", arc)
-    .style("fill", function(d) { return color((d.children ? d : d.parent).name); })
-    .on("click", click);
+  var orig_json = json;
+  var nodes = partition.nodes(json);
 
-  var text = g.append("text")
-    .attr("transform", function(d) { return "rotate(" + computeTextRotation(d) + ")"; })
-    .attr("display", function(d) { return d.depth ? null : "none"; }) // hide inner ring
-    .attr("x", function(d) { return y(d.y); })
-    .attr("dx", "6") // margin
-    .attr("dy", ".35em") // vertical-align
-    .attr("visibility", labelvis)
-    .text(label);
+  var path = vis.datum(json).selectAll("path")
+      .data(partition.nodes(json))
+    .enter().append("path")
+      .attr("d", arc)
+      .style("stroke", "#fff")
+      .style("fill", function(d) { return color((d.children ? d : d.parent).name); })
+      .style("fill-rule", "evenodd")
+      .on("click", click)
+      .each(stash);
 
-  d3.selectAll(".unshard_button").on("change", function() {
-    console.log(partition.nodes(root))
-    console.log(root['children'])
-    g
-      .data(partition.nodes(root))
-      .transition()
-        .duration(1500)
-        .attrTween("d", arcTween);
-  });
+  var text = vis.selectAll("text").data(nodes);
+
+  var textEnter = text.enter().append("text")
+      .style("fill-opacity", 1)
+      .attr("text-anchor", function(d) {
+        return x(d.x + d.dx / 2) > Math.PI ? "end" : "start";
+      })
+      .attr("dy", ".2em")
+      .attr("transform", function(d) {
+        var multiline = (d.name || "").split(" ").length > 1,
+            angle = x(d.x + d.dx / 2) * 180 / Math.PI - 90,
+            rotate = angle + (multiline ? -.5 : 0);
+        return "rotate(" + rotate + ")translate(" + (y(d.y) + padding) + ")rotate(" + (angle > 90 ? -180 : 0) + ")";
+      })
+      .on("click", click);
+  textEnter.append("tspan")
+      .attr("x", 0)
+      .text(function(d) { return d.depth ? d.name.split(" ")[0] : ""; })
+      .style("visibility", function(e) {
+        return e.depth < rings ? null : "hidden";
+      });
+  textEnter.append("tspan")
+      .attr("x", 0)
+      .attr("dy", "1em")
+      .text(function(d) { return d.depth ? d.name.split(" ")[1] || "" : ""; })
+      .style("visibility", function(e) {
+        return e.depth < rings ? null : "hidden";
+      });
+
+  d3.selectAll(".select_size").on("change", change)
+  d3.selectAll(".unshard_button").on("change", change)
 
   function click(d) {
-    // fade out all text elements
-    text.transition().attr("opacity", 0);
-
     path.transition()
-      .duration(750)
-      .attrTween("d", arcTween(d))
-      .each("end", function(e, i) {
-          // check if the animated element's data e lies within the visible angle span given in d
-          if (e.x >= d.x && e.x < (d.x + d.dx)) {
-            // get a selection of the associated text element
-            var arcText = d3.select(this.parentNode).select("text");
-            // fade in the text element and recalculate positions
-            arcText.transition().duration(750)
-              .attr("opacity", 1)
-              .attr("transform", function() { return "rotate(" + computeTextRotation(e) + ")" })
-              .attr("x", function(d) { return y(d.y); });
-          }
-      });
-  }
-/*
-  d3.selectAll("input").on("change", function change() {
-    var value = this.value === "count"
-        ? function() { return 1; }
-        : function(d) { return d.size; };
+      .duration(duration)
+      .attrTween("d", arcTween(d));
 
-    path
-        .data(partition.value(value).nodes)
+    // Somewhat of a hack as we rely on arcTween updating the scales.
+    text.style("visibility", function(e) {
+          return isParentOf(d, e) ? null : d3.select(this).style("visibility");
+        })
       .transition()
-        .duration(1500)
-        .attrTween("d", arcTween);
-  });
-*/
+        .duration(duration)
+        .attrTween("text-anchor", transformTextAnchor)
+        .attrTween("transform", transformText)
+        .style("fill-opacity", function(e) { return isParentOf(d, e) ? 1 : 1e-6; })
+        .each("end", function(e) {
+          d3.select(this).style("visibility", check_visibility(e) );
+          //d3.select(this).style("visibility", isParentOf(d, e) ? null : "hidden");
+        });
+  }
+
+  function change() {
+    var value = function(e) { return select_matrix( e ) }
+    path
+      .data(partition.value(value).nodes)
+          .transition()
+            .duration(duration)
+            .attrTween("d", arcTween2);
+    text.style("visibility", "hidden")
+      .transition()
+        .duration(duration)
+        .attrTween("text-anchor", transformTextAnchor)
+        .attrTween("transform", transformText)
+        .each("end", function(e) {
+          d3.select(this).style("visibility", check_visibility(e) );
+        })
+  }
 });
 
-d3.select(self.frameElement).style("height", height + "px");
+function isParentOf(p, c) {
+  if (p === c) return true;
+  if (p.children) {
+    return p.children.some(function(d) {
+      return isParentOf(d, c);
+    });
+  }
+  return false;
+}
 
 // Interpolate the scales!
 function arcTween(d) {
-  var xd = d3.interpolate(x.domain(), [d.x, d.x + d.dx]),
-      yd = d3.interpolate(y.domain(), [d.y, 1]),
+  var my = maxY(d),
+      xd = d3.interpolate(x.domain(), [d.x, d.x + d.dx]),
+      yd = d3.interpolate(y.domain(), [d.y, my]),
       yr = d3.interpolate(y.range(), [d.y ? 20 : 0, radius]);
-  return function(d, i) {
-    return i
-        ? function(t) { return arc(d); }
-        : function(t) { x.domain(xd(t)); y.domain(yd(t)).range(yr(t)); return arc(d); };
+  return function(d) {
+    return function(t) { x.domain(xd(t)); y.domain(yd(t)).range(yr(t)); return arc(d); };
+  };
+}
+function arcTween2(a) {
+  var i = d3.interpolate({x: a.x0, dx: a.dx0}, a);
+  return function(t) {
+    var b = i(t);
+    a.x0 = b.x;
+    a.dx0 = b.dx;
+    return arc(b);
+  };
+}
+function maxY(d) {
+  return d.children && d.children.length ? Math.max.apply(Math, d.children.map(maxY)) : d.y + d.dy;
+}
+
+function transformText(d) {
+    var multiline = (d.name || "").split(" ").length > 1;
+  return function() {
+    var angle = x(d.x + d.dx / 2) * 180 / Math.PI - 90,
+        rotate = angle + (multiline ? -.5 : 0);
+    return "rotate(" + rotate + ")translate(" + (y(d.y) + padding) + ")rotate(" + (angle > 90 ? -180 : 0) + ")";
   };
 }
 
-function computeTextRotation(d) {
-  return (x(d.x + d.dx / 2) - Math.PI / 2) / Math.PI * 180;
-}
-
-function label(d) {
-  if(d.depth > 0) {
-    return d.name
-  }
-}
-
-function labelvis(d) {
-  return 'visible'
-  /*
-  //this was in use previously for perf
-  if (d.depth < rings) {
-    return 'visible'
-  }
-  else {
-    return 'hidden'
-  }
-  */
+function transformTextAnchor(d) {
+  return function() {
+    return x(d.x + d.dx / 2) > Math.PI ? "end" : "start";
+  };
 }
 
 // Stash the old values for transition.
@@ -154,4 +195,52 @@ function stash(d) {
   d.x0 = d.x;
   d.dx0 = d.dx;
 }
+
+function getDepth(d) {
+    var depth = 0;
+    if (d.children) {
+        d.children.forEach(function (e) {
+            var tmpDepth = getDepth(e)
+            if (tmpDepth > depth) {
+                depth = tmpDepth
+            }
+        })
+    }
+    return 1 + depth
+}
+
+function select_matrix(d) {
+  un = d3.select('.unshard_button').property('checked');
+  size = d3.selectAll('.select_size').property('checked');
+  if (un) {
+    if (size) {
+      return d.size && d.size > 0 ? d.size : 100;
+    }
+    if (!size) {
+      return d.objects && d.objects > 0 ? d.objects : 1
+    }
+  }
+  if(!un) {
+    if(size) {
+      return d.size && d.size > 0 ? d.size : 0;
+    }
+    if(!size) {
+      return d.objects && d.objects > 0 ? d.objects : 0;
+    }
+  }
+}
+
+function check_visibility(d) {
+  un = d3.select('.unshard_button').property('checked');
+  if(un) {
+    return 'visible'
+  } else {
+    return d.children && d.children.length > 0 ? 'visible' : 'hidden'
+  }
+
+}
+</script>
+
+<script>
+  if (top != self) top.location.replace(location);
 </script>
