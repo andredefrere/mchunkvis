@@ -63,7 +63,7 @@ class MongoChunkVis( object ):
 
 		parser.add_argument('--configdb', action='store', nargs='*', help='config datbase to analyse', default='config')
 		parser.add_argument('--host', action='store', nargs='*', help='host to connect to', default='localhost')
-		parser.add_argument('--port', action='store', nargs='*', help='port to connect to', default=27017)
+		parser.add_argument('--port', action='store', nargs='*', help='port to connect to', default='27017')
 
 		self.args = vars(parser.parse_args())
 
@@ -82,15 +82,15 @@ class MongoChunkVis( object ):
 		ccoll = db['collections']
 
 		for databases in cdatabases.find():
-			databasedata = { 'name' : databases['_id'], 'children' : [] }
+			databasedata = { 'name' : databases['_id'], 'children' : [], '_id' : databases['_id'].replace(".","") }
 			if databases['partitioned']:
 				for coll in ccoll.find( { '_id' : { '$regex' : '^%s'%databases['_id']}, 'dropped' : False } ):
-					colldata = { 'name' : coll['_id'].replace(databases['_id'],'',1), 'children' : [], 'size' : 1 }
+					colldata = { 'name' : coll['_id'].replace(databases['_id'],'',1), 'children' : [], 'size' : 1, '_id' : coll['_id'].replace(".","") }
 					for shards in cshards.find():
 						sharddata = { 'name' : shards['_id'], 'children' : [] }
 						for chunks in cchunks.find( { 'shard' : shards['_id'], 'ns' : coll['_id'] } ):
 							colldata['size'] +=1
-							chunkdata = { 'name' : chunks['_id'].replace(chunks['ns'],'',1), 'size' : 1, 'objects' : 1 }
+							chunkdata = { 'name' : chunks['_id'].replace(chunks['ns'],'',1), 'size' : 1, 'objects' : 1, '_id' : chunks['_id'].replace(".","") }
 							sharddata['children'].append(chunkdata)
 						colldata['children'].append(sharddata)
 

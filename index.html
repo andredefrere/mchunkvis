@@ -66,37 +66,53 @@ d3.json("output.json", function(json) {
       .data(partition.nodes(json))
     .enter().append("path")
       .attr("d", arc)
+      .attr("class", function(d) { return d.depth < rings ? 'branch' : "leaf"+d.parent.parent.name.replace(".","") + d.parent.name; } )
+      .attr("id", function(d) {return d.depth < rings ? 'branch' : "leafnode"})
       .style("stroke", "#fff")
       .style("fill", function(d) { return color((d.children ? d : d.parent).name); })
       .style("fill-rule", "evenodd")
+      .style("visibility", function(d) { return d.depth < rings ? null : "hidden" } )
       .on("click", click)
       .each(stash);
 
   var text = vis.selectAll("text").data(nodes);
 
+/*
+  var infotextEnter = text.enter().append("text")
+    .attr("transform", function(d) {
+      return "translate(50)"
+    })
+    .style("visibility", 'hidden')
+    .attr("class", function (d) { return "chunkinfo_"+d._id } );
+
+  infotextEnter.append('tspan')
+    .text("chunk information:")
+
+  infotextEnter.append('tspan')
+    .attr("x", 0)
+    .attr("dy", "1em")
+    .text(function(d) { return d._id } )
+*/
   var textEnter = text.enter().append("text")
       .style("fill-opacity", 1)
       .attr("text-anchor", function(d) {
         return x(d.x + d.dx / 2) > Math.PI ? "end" : "start";
       })
+
       .attr("dy", ".2em")
       .attr("transform", function(d) {
-        var multiline = (d.name || "").split(" ").length > 1,
-            angle = x(d.x + d.dx / 2) * 180 / Math.PI - 90,
-            rotate = angle + (multiline ? -.5 : 0);
+        //var multiline = (d.name || "").split(" ").length > 1,
+        var angle = x(d.x + d.dx / 2) * 180 / Math.PI - 90,
+            //rotate = angle + (multiline ? -.5 : 0);
+            rotate = angle -.5;
         return "rotate(" + rotate + ")translate(" + (y(d.y) + padding) + ")rotate(" + (angle > 90 ? -180 : 0) + ")";
       })
-      .on("click", click);
+      //.on("click", click);
+
   textEnter.append("tspan")
       .attr("x", 0)
-      .text(function(d) { return d.depth ? d.name.split(" ")[0] : ""; })
-      .style("visibility", function(e) {
-        return e.depth < rings ? null : "hidden";
-      });
-  textEnter.append("tspan")
-      .attr("x", 0)
-      .attr("dy", "1em")
-      .text(function(d) { return d.depth ? d.name.split(" ")[1] || "" : ""; })
+      .attr("class", function(d) { return d.depth < rings ? d._id : d.parent.parent.name.replace(".","")+d.parent.name; } )
+      .text(function(d) { return d.depth != 0 ? d.name : "" })
       .style("visibility", function(e) {
         return e.depth < rings ? null : "hidden";
       });
@@ -105,22 +121,37 @@ d3.json("output.json", function(json) {
   d3.selectAll(".unshard_button").on("change", change)
 
   function click(d) {
+
+    //infotextEnter.style("visibility", "hidden");
+    if(getDepth(d) > 2) {
+      vis.selectAll("#leafnode")
+       .style("visibility", "hidden")
+     }
     path.transition()
       .duration(duration)
       .attrTween("d", arcTween(d));
 
     // Somewhat of a hack as we rely on arcTween updating the scales.
     text.style("visibility", function(e) {
-          return isParentOf(d, e) ? null : d3.select(this).style("visibility");
+          //return isParentOf(d, e) ? null : d3.select(this).style("visibility");
+          return check_visibility(e);
         })
       .transition()
         .duration(duration)
-        .attrTween("text-anchor", transformTextAnchor)
-        .attrTween("transform", transformText)
+        .attrTween("text-anchor", transformTextAnchor )
+        .attrTween("transform", transformText )
         .style("fill-opacity", function(e) { return isParentOf(d, e) ? 1 : 1e-6; })
         .each("end", function(e) {
-          d3.select(this).style("visibility", check_visibility(e) );
-          //d3.select(this).style("visibility", isParentOf(d, e) ? null : "hidden");
+          if (getDepth(d) <= 2 ) {
+            d3.select(this).style("visibility", null );
+            var leafnodes = vis.selectAll(".leaf"+d.parent.name.replace(".","")+d.name)
+            leafnodes.style("visibility", null)
+              var textSpan = text.select('.'+d.parent.name.replace(".","")+d.name);
+              //var infTextSpan = vis.select('.chunkinfo_'+d._id);
+              //textSpan.text(d.name);
+              textSpan.style("visibility", null);
+              //infTextSpan.style("visibility", null);
+            } else d3.select(this).style("visibility", check_visibility(e) ); 
         });
   }
 
@@ -134,8 +165,8 @@ d3.json("output.json", function(json) {
     text.style("visibility", "hidden")
       .transition()
         .duration(duration)
-        .attrTween("text-anchor", transformTextAnchor)
-        .attrTween("transform", transformText)
+        .attrTween("text-anchor", transformTextAnchor )
+        .attrTween("transform", transformText )
         .each("end", function(e) {
           d3.select(this).style("visibility", check_visibility(e) );
         })
@@ -176,18 +207,18 @@ function maxY(d) {
 }
 
 function transformText(d) {
-    var multiline = (d.name || "").split(" ").length > 1;
-  return function() {
+    //var multiline = (d.name || "").split(" ").length > 1;
+    return function() {
     var angle = x(d.x + d.dx / 2) * 180 / Math.PI - 90,
-        rotate = angle + (multiline ? -.5 : 0);
+        rotate = angle -.5;
     return "rotate(" + rotate + ")translate(" + (y(d.y) + padding) + ")rotate(" + (angle > 90 ? -180 : 0) + ")";
-  };
+  }
 }
 
 function transformTextAnchor(d) {
   return function() {
     return x(d.x + d.dx / 2) > Math.PI ? "end" : "start";
-  };
+  }
 }
 
 // Stash the old values for transition.
@@ -233,9 +264,9 @@ function select_matrix(d) {
 function check_visibility(d) {
   un = d3.select('.unshard_button').property('checked');
   if(un) {
-    return 'visible'
+    return d.depth < rings ? null : 'hidden'
   } else {
-    return d.children && d.children.length > 0 ? 'visible' : 'hidden'
+    return d.children && d.children.length > 0 ? null : 'hidden'
   }
 
 }
