@@ -2,6 +2,11 @@
 <!DOCTYPE html>
 <meta charset="utf-8">
 <div id="vis"></div>
+<form>
+  <label><input class='unshard_button' type="checkbox" name="mode" >Show Unsharded Collections</label>
+  <label><input class='select_size' type='radio' name='mode' value='size' checked>Size</label>
+  <label><input class='select_size' type='radio' name='mode' value='object'>Objects</label>
+</form>
 <style>
 
 path {
@@ -19,11 +24,6 @@ text {
 <script src="d3.v3/d3.v3.min.js"></script>
 -->
 <body>
-<form>
-  <label><input class='unshard_button' type="checkbox" name="mode" >Show Unsharded Collections</label>
-  <label><input class='select_size' type='radio' name='mode' value='size' checked>Size</label>
-  <label><input class='select_size' type='radio' name='mode' value='object'>Objects</label>
-</form>
 
 <script src="http://d3js.org/d3.v3.min.js"></script>
 <script>
@@ -43,9 +43,15 @@ var color = d3.scale.category20c();
 
 var vis = div.append("svg")
     .attr("width", width + padding * 2)
-    .attr("height", height + padding * 2)
+    .attr("height", width + padding * 2)
   .append("g")
     .attr("transform", "translate(" + [radius + padding, radius + padding] + ")");
+
+var dat = div.append("svg")
+    .attr("width", 400 + padding * 2)
+    .attr("height", height + padding * 2)
+  .append("g")
+    .attr("transform", "translate(100,50)");
 
 var partition = d3.layout.partition()
     .sort(null)
@@ -67,7 +73,7 @@ d3.json("output.json", function(json) {
     .enter().append("path")
       .attr("d", arc)
       .attr("class", function(d) { return d.depth < rings ? 'branch' : "leaf"+d.parent.parent.name.replace(".","") + d.parent.name; } )
-      .attr("id", function(d) {return d.depth < rings ? 'branch' : "leafnode"})
+      .attr("node", function(d) { return d.depth < rings ? 'branch' : 'leafnode' } )
       .style("stroke", "#fff")
       .style("fill", function(d) { return color((d.children ? d : d.parent).name); })
       .style("fill-rule", "evenodd")
@@ -75,24 +81,23 @@ d3.json("output.json", function(json) {
       .on("click", click)
       .each(stash);
 
-  var text = vis.selectAll("text").data(nodes);
-
-/*
-  var infotextEnter = text.enter().append("text")
-    .attr("transform", function(d) {
-      return "translate(50)"
-    })
+  var infotextEnter = dat.append("text")
     .style("visibility", 'hidden')
-    .attr("class", function (d) { return "chunkinfo_"+d._id } );
+    .attr("id", "infotext")
 
   infotextEnter.append('tspan')
     .text("chunk information:")
 
   infotextEnter.append('tspan')
-    .attr("x", 0)
-    .attr("dy", "1em")
-    .text(function(d) { return d._id } )
-*/
+    .attr("id", "infotextdatatitle")
+
+  infotextEnter.append('tspan')
+    .attr('y', '20')
+    .attr('x', '0')
+    .attr("id", "infotextdata1")
+
+  var text = vis.selectAll("text").data(nodes);
+
   var textEnter = text.enter().append("text")
       .style("fill-opacity", 1)
       .attr("text-anchor", function(d) {
@@ -113,6 +118,7 @@ d3.json("output.json", function(json) {
       .attr("x", 0)
       .attr("class", function(d) { return d.depth < rings ? d._id : d.parent.parent.name.replace(".","")+d.parent.name; } )
       .text(function(d) { return d.depth != 0 ? d.name : "" })
+      //.style("visbiluty", null)
       .style("visibility", function(e) {
         return e.depth < rings ? null : "hidden";
       });
@@ -122,37 +128,49 @@ d3.json("output.json", function(json) {
 
   function click(d) {
 
+    var curDepth = getDepth(d)
     //infotextEnter.style("visibility", "hidden");
-    if(getDepth(d) > 2) {
-      vis.selectAll("#leafnode")
+    if(curDepth>1) {
+      dat.select('#infotext')
+        .style('visibility', 'hidden');
+    }
+    if(curDepth > 2) {
+      vis.selectAll('[node="leafnode"]')
        .style("visibility", "hidden")
-     }
+    } else if (curDepth <= 2 ) {
+        //d3.select(this).style("visibility", null );
+            var superParent = d.parent.name.replace(".","")+d.name
+            var leafnodes = vis.selectAll(".leaf"+superParent);
+            leafnodes.style("visibility", null)
+            var textSpan = text.selectAll('.'+superParent);
+            textSpan.style("visibility", null);
+            if (curDepth == 1 ) {
+              var infTextSpan = dat.select('#infotext');
+              infTextSpan.style('visibility', null);
+              infTextSpan.select('#infotextdatatitle')
+                .text(d.name);
+              infTextSpan.select("#infotextdata1")
+                .text(d._id);
+            }
+    }
+
+    if(d._id) {
+      path.select()
+    }
     path.transition()
       .duration(duration)
       .attrTween("d", arcTween(d));
 
     // Somewhat of a hack as we rely on arcTween updating the scales.
     text.style("visibility", function(e) {
-          //return isParentOf(d, e) ? null : d3.select(this).style("visibility");
-          return check_visibility(e);
+          //return isParentOf(d, e) ? null : d3.select(this).style("visibility"); 
+          return curDepth <= 2 ? null : check_visibility(e);
         })
       .transition()
         .duration(duration)
         .attrTween("text-anchor", transformTextAnchor )
         .attrTween("transform", transformText )
         .style("fill-opacity", function(e) { return isParentOf(d, e) ? 1 : 1e-6; })
-        .each("end", function(e) {
-          if (getDepth(d) <= 2 ) {
-            d3.select(this).style("visibility", null );
-            var leafnodes = vis.selectAll(".leaf"+d.parent.name.replace(".","")+d.name)
-            leafnodes.style("visibility", null)
-              var textSpan = text.select('.'+d.parent.name.replace(".","")+d.name);
-              //var infTextSpan = vis.select('.chunkinfo_'+d._id);
-              //textSpan.text(d.name);
-              textSpan.style("visibility", null);
-              //infTextSpan.style("visibility", null);
-            } else d3.select(this).style("visibility", check_visibility(e) ); 
-        });
   }
 
   function change() {
